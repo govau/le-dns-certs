@@ -22,33 +22,33 @@ func TestRateLimit(t *testing.T) {
 	hTime.Set("Retry-After", "Tue Apr 27 11:00:00 2017")
 
 	err1 := &Error{
-		ProblemType: "urn:ietf:params:acme:error:nolimit",
-		Header:      h120,
+		Type:   "urn:ietf:params:acme:error:nolimit",
+		Header: h120,
 	}
 	err2 := &Error{
-		ProblemType: "urn:ietf:params:acme:error:rateLimited",
-		Header:      h120,
+		Type:   "urn:ietf:params:acme:error:rateLimited",
+		Header: h120,
 	}
 	err3 := &Error{
-		ProblemType: "urn:ietf:params:acme:error:rateLimited",
-		Header:      nil,
+		Type:   "urn:ietf:params:acme:error:rateLimited",
+		Header: nil,
 	}
 	err4 := &Error{
-		ProblemType: "urn:ietf:params:acme:error:rateLimited",
-		Header:      hTime,
+		Type:   "urn:ietf:params:acme:error:rateLimited",
+		Header: hTime,
 	}
 
 	tt := []struct {
 		err error
-		res time.Duration
+		res time.Time
 		ok  bool
 	}{
-		{nil, 0, false},
-		{errors.New("dummy"), 0, false},
-		{err1, 0, false},
-		{err2, 2 * time.Minute, true},
-		{err3, 0, true},
-		{err4, time.Hour, true},
+		{},
+		{err: errors.New("dummy")},
+		{err: err1},
+		{err: err2, res: now.Add(2 * time.Minute), ok: true},
+		{err: err3, ok: true},
+		{err: err4, res: now.Add(time.Hour), ok: true},
 	}
 	for i, test := range tt {
 		res, ok := RateLimit(test.err)
@@ -56,7 +56,7 @@ func TestRateLimit(t *testing.T) {
 			t.Errorf("%d: RateLimit(%+v): ok = %v; want %v", i, test.err, ok, test.ok)
 			continue
 		}
-		if res != test.res {
+		if !res.Equal(test.res) {
 			t.Errorf("%d: RateLimit(%+v) = %v; want %v", i, test.err, res, test.res)
 		}
 	}

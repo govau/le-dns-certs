@@ -138,7 +138,7 @@ func TestJWSEncodeJSON(t *testing.T) {
 	// JWS signed with testKey and "nonce" as the nonce value
 	// JSON-serialized JWS fields are split for easier testing
 	const (
-		// {"alg":"RS256","jwk":{"e":"AQAB","kty":"RSA","n":"..."},"nonce":"nonce"}
+		// {"alg":"RS256","jwk":{"e":"AQAB","kty":"RSA","n":"..."},"url":"https://example.com","nonce":"nonce"}
 		protected = "eyJhbGciOiJSUzI1NiIsImp3ayI6eyJlIjoiQVFBQiIsImt0eSI6" +
 			"IlJTQSIsIm4iOiI0eGdaM2VSUGt3b1J2eTdxZVJVYm1NRGUwVi14" +
 			"SDllV0xkdTBpaGVlTGxybUQybXFXWGZQOUllU0tBcGJuMzRnOFR1" +
@@ -149,19 +149,20 @@ func TestJWSEncodeJSON(t *testing.T) {
 			"bFBvaWIyajNUeExCa3NLWmZveUZ5ZWszODBtSGdKQXVtUV9JMmZq" +
 			"ajk4Xzk3bWszaWhPWTRBZ1ZkQ0RqMXpfR0NvWmtHNVJxN25iQ0d5" +
 			"b3N5S1d5RFgwMFpzLW5OcVZob0xlSXZYQzRubldkSk1aNnJvZ3h5" +
-			"UVEifSwibm9uY2UiOiJub25jZSJ9"
+			"UVEifSwibm9uY2UiOiJub25jZSIsInVybCI6Imh0dHBzOi8vZXhh" +
+			"bXBsZS5jb20ifQ"
 		// {"Msg":"Hello JWS"}
 		payload   = "eyJNc2ciOiJIZWxsbyBKV1MifQ"
-		signature = "eAGUikStX_UxyiFhxSLMyuyBcIB80GeBkFROCpap2sW3EmkU_ggF" +
-			"knaQzxrTfItICSAXsCLIquZ5BbrSWA_4vdEYrwWtdUj7NqFKjHRa" +
-			"zpLHcoR7r1rEHvkoP1xj49lS5fc3Wjjq8JUhffkhGbWZ8ZVkgPdC" +
-			"4tMBWiQDoth-x8jELP_3LYOB_ScUXi2mETBawLgOT2K8rA0Vbbmx" +
-			"hWNlOWuUf-8hL5YX4IOEwsS8JK_TrTq5Zc9My0zHJmaieqDV0UlP" +
-			"k0onFjPFkGm7MrPSgd0MqRG-4vSAg2O4hDo7rKv4n8POjjXlNQvM" +
-			"9IPLr8qZ7usYBKhEGwX3yq_eicAwBw"
+		signature = "EtedUusG_N7NkuHRs9Ios6V0_VZdjYPut8vqRMDHvZQ3kZO0d5-9" +
+			"BivWINleGajAW29So64s4WYsITx2Y0g3obSw70Xsr8XVsVox2Wsx" +
+			"RJgd6KBNk1SGzqUW7-yEaS0fs0ax5SHPwpS9ek9WPCZ0MphfUH3d" +
+			"qK40x6dYbgY9mInfzf7L11QeRrQdJfGuef_74SJGTp6D4B5UrR2w" +
+			"m-AoSsRXY5A99U7J8YE9LFTg7pUQRSQWqqGZu-U9VDiB8bBvViVH" +
+			"1abbI5xHaSagDb1avfdIXqYv_QVeMXF67Nis8f963FOdX0zwjpob" +
+			"mpi-rsSmLBEtUkLERBIU_8JRdkXMcw"
 	)
 
-	b, err := jwsEncodeJSON(claims, testKey, "nonce")
+	b, err := jwsEncodeJSON(claims, testKey, "", "https://example.com", "nonce")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +193,7 @@ func TestJWSEncodeJSONEC(t *testing.T) {
 	}
 	for i, test := range tt {
 		claims := struct{ Msg string }{"Hello JWS"}
-		b, err := jwsEncodeJSON(claims, test.key, "nonce")
+		b, err := jwsEncodeJSON(claims, test.key, "", "https://example.com", "nonce")
 		if err != nil {
 			t.Errorf("%d: %v", i, err)
 			continue

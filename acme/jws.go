@@ -20,16 +20,21 @@ import (
 // jwsEncodeJSON signs claimset using provided key and a nonce.
 // The result is serialized in JSON format.
 // See https://tools.ietf.org/html/rfc7515#section-7.
-func jwsEncodeJSON(claimset interface{}, key crypto.Signer, nonce string) ([]byte, error) {
-	jwk, err := jwkEncode(key.Public())
-	if err != nil {
-		return nil, err
-	}
+func jwsEncodeJSON(claimset interface{}, key crypto.Signer, accountURL, url, nonce string) ([]byte, error) {
 	alg, sha := jwsHasher(key)
 	if alg == "" || !sha.Available() {
 		return nil, ErrUnsupportedKey
 	}
-	phead := fmt.Sprintf(`{"alg":%q,"jwk":%s,"nonce":%q}`, alg, jwk, nonce)
+	var phead string
+	if accountURL == "" {
+		jwk, err := jwkEncode(key.Public())
+		if err != nil {
+			return nil, err
+		}
+		phead = fmt.Sprintf(`{"alg":%q,"jwk":%s,"nonce":%q,"url":%q}`, alg, jwk, nonce, url)
+	} else {
+		phead = fmt.Sprintf(`{"alg":%q,"kid":%q,"nonce":%q,"url":%q}`, alg, accountURL, nonce, url)
+	}
 	phead = base64.RawURLEncoding.EncodeToString([]byte(phead))
 	cs, err := json.Marshal(claimset)
 	if err != nil {
