@@ -9,10 +9,11 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
-	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -22,7 +23,6 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"golang.org/x/crypto/acme"
-	"gopkg.in/yaml.v2"
 )
 
 // fetchCertAndReturnExpiry - will return the first leaf certificate NotValidAfter date.
@@ -84,12 +84,12 @@ func getTTLOfLeafFromChain(bb []byte) (time.Time, error) {
 func (c *config) getCertFromLetsEncrypt(hostname string, hostrec *domainConf, route53client *route53.Route53) ([]byte, error) {
 	// First, register our key if not already done
 	if !c.ACME.registered {
-		log.Println("Always try to register on startup, who cares if we already have...")
+		log.Println("always try to register our key and email address with Let's Encrypt...")
 		_, err := c.ACME.client.Register(context.Background(), &acme.Account{
 			Contact: []string{"mailto:" + c.ACME.Email},
 		}, acme.AcceptTOS)
 		if err != nil {
-			log.Println("Error registering with LE - we've likely already done so, so ignoring:", err)
+			log.Println("error registering with Let's Encrypt (this is expected) - ignoring: ", err)
 		}
 
 		// no point re-doing each time
@@ -97,6 +97,7 @@ func (c *config) getCertFromLetsEncrypt(hostname string, hostrec *domainConf, ro
 	}
 
 	// Now, initiate DNS challenge
+	log.Println("checking authorization...")
 	authz, err := c.ACME.client.Authorize(context.Background(), hostname)
 	if err != nil {
 		return nil, err
@@ -104,6 +105,7 @@ func (c *config) getCertFromLetsEncrypt(hostname string, hostrec *domainConf, ro
 
 	// We can skip this if we already have an authorization
 	if authz.Status != acme.StatusValid {
+		log.Println("we need to re-authorize for this domain")
 		var chal *acme.Challenge
 		for _, c := range authz.Challenges {
 			if c.Type == "dns-01" {
@@ -121,6 +123,7 @@ func (c *config) getCertFromLetsEncrypt(hostname string, hostrec *domainConf, ro
 		}
 
 		// Return TXT record
+		log.Println("setting TXT record in route53")
 		changeResult, err := route53client.ChangeResourceRecordSets(&route53.ChangeResourceRecordSetsInput{
 			HostedZoneId: aws.String(hostrec.ZoneID),
 			ChangeBatch: &route53.ChangeBatch{
@@ -133,7 +136,7 @@ func (c *config) getCertFromLetsEncrypt(hostname string, hostrec *domainConf, ro
 							Type: aws.String("TXT"),
 							ResourceRecords: []*route53.ResourceRecord{
 								&route53.ResourceRecord{
-									Value: aws.String(val),
+									Value: aws.String(fmt.Sprintf(`"%s"`, val)),
 								},
 							},
 						},
@@ -144,6 +147,7 @@ func (c *config) getCertFromLetsEncrypt(hostname string, hostrec *domainConf, ro
 		if err != nil {
 			return nil, err
 		}
+		log.Println("waiting on route53 change to be complete...")
 		err = route53client.WaitUntilResourceRecordSetsChanged(&route53.GetChangeInput{
 			Id: changeResult.ChangeInfo.Id,
 		})
@@ -151,6 +155,7 @@ func (c *config) getCertFromLetsEncrypt(hostname string, hostrec *domainConf, ro
 			return nil, err
 		}
 
+		log.Println("accepting Let's Encrypt challenge")
 		_, err = c.ACME.client.Accept(context.Background(), chal)
 		if err != nil {
 			return nil, err
@@ -163,12 +168,13 @@ func (c *config) getCertFromLetsEncrypt(hostname string, hostrec *domainConf, ro
 		}
 	}
 
-	// OK, time to issue cert
+	log.Println("generating key for certificate...")
 	pkey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return nil, err
 	}
 
+	log.Println("generating certificate signing request...")
 	csr, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
 		Subject: pkix.Name{
 			CommonName: hostname,
@@ -178,15 +184,14 @@ func (c *config) getCertFromLetsEncrypt(hostname string, hostrec *domainConf, ro
 		return nil, err
 	}
 
-	log.Println("creating cert...")
-
+	log.Println("requesting certificate...")
 	ders, _, err := c.ACME.client.CreateCert(context.Background(), csr, 0, true)
 	if err != nil {
 		return nil, err
 	}
 
+	log.Println("received. marshaling result...")
 	buf := &bytes.Buffer{}
-
 	err = pem.Encode(buf, &pem.Block{
 		Type:  "RSA PRIVATE KEY",
 		Bytes: x509.MarshalPKCS1PrivateKey(pkey),
@@ -208,6 +213,7 @@ func (c *config) getCertFromLetsEncrypt(hostname string, hostrec *domainConf, ro
 }
 
 func (c *config) writeCertToS3(data []byte, hostrec *domainConf, s3client *s3.S3) error {
+	log.Println("writing to S3...")
 	result, err := s3manager.NewUploaderWithClient(s3client).Upload(&s3manager.UploadInput{
 		Bucket:               aws.String(hostrec.Bucket),
 		Key:                  aws.String(hostrec.Object),
@@ -217,7 +223,7 @@ func (c *config) writeCertToS3(data []byte, hostrec *domainConf, s3client *s3.S3
 	if err != nil {
 		return err
 	}
-	log.Printf("Cert successfully uploaded to: %s (version %s)\n", result.Location, stringval(result.VersionID))
+	log.Printf("cert successfully uploaded to: %s (version %s)\n", result.Location, stringval(result.VersionID))
 
 	return nil
 }
@@ -237,21 +243,22 @@ func (c *config) updateCertIfNeeded(hostname string, hostrec *domainConf) error 
 		return err
 	}
 
-	// See if we have an existing cert, and if so fetch it's TTL
+	log.Printf("checking for existing certificate for %s...\n", hostname)
 	s3client := s3.New(sess)
 	certTTL, err := c.fetchCertAndReturnExpiry(hostrec, s3client)
 	if err != nil {
 		return err
 	}
 
+	log.Printf("expiration date: %s\n", certTTL.Format(time.RFC3339))
+
 	// If the cert is valid after now + our duration
 	if time.Now().Add(time.Duration(c.TTLDays) * 24 * time.Hour).Before(certTTL) {
-		// Then reset our internal TTL and return early
-		hostrec.ttl = certTTL.Add(-time.Duration(c.TTLDays) * 24 * time.Hour)
+		log.Println("no renewal needed")
 		return nil
 	}
 
-	// Fetch new cert
+	log.Println("attempting to refresh certificate from Let's Encrypt")
 	certData, err := c.getCertFromLetsEncrypt(hostname, hostrec, route53.New(sess))
 	if err != nil {
 		return err
@@ -263,74 +270,93 @@ func (c *config) updateCertIfNeeded(hostname string, hostrec *domainConf) error 
 		return err
 	}
 
-	// get TTL as we'll reset it next - and we'll use this also as a basic error check
-	leafEnd, err := getTTLOfLeafFromChain(certData)
-	if err != nil {
-		return err
-	}
-
-	// Don't come back for a while
-	hostrec.ttl = leafEnd.Add(-time.Duration(c.TTLDays) * 24 * time.Hour)
-
 	// Done and happy
 	return nil
 }
 
-func run(configPath string) error {
-	if configPath == "" {
-		return errors.New("must specify a config path")
+func (c *config) runOnce() error {
+	var retErr error
+	for hostname, hostrec := range c.Domains {
+		err := c.updateCertIfNeeded(hostname, hostrec)
+		if err != nil {
+			log.Printf("error updating cert for %s: %s\n", hostname, err)
+			retErr = errors.New("at least one failed")
+		}
+	}
+	return retErr
+}
+
+func readConf() (*config, error) {
+	c := &config{
+		ACME: acmeConf{
+			URL:        envWithDefault("LE_URL", "https://acme-v01.api.letsencrypt.org/directory"),
+			Email:      mustGetEnv("LE_EMAIL_ADDRESS"),
+			PrivateKey: mustGetEnv("LE_PRIVATE_KEY"),
+		},
+		AWSRegion: mustGetEnv("AWS_REGION"),
+		TTLDays:   mustConvertInt(envWithDefault("LE_DAYS_BEFORE_TO_RENEW", "32")),
+		Domains: map[string]*domainConf{
+			mustGetEnv("FQDN_FOR_CERT"): &domainConf{
+				Bucket: mustGetEnv("S3_BUCKET"),
+				Object: envWithDefault("S3_OBJECT", fmt.Sprintf("%s.crt", mustGetEnv("FQDN_FOR_CERT"))),
+				ZoneID: mustGetEnv("ROUTE53_ZONEID"),
+			},
+		},
 	}
 
-	data, err := ioutil.ReadFile(configPath)
-	if err != nil {
-		return err
-	}
-
-	var c config
-	err = yaml.Unmarshal(data, &c)
-	if err != nil {
-		return err
-	}
-
-	// Parse ACME key early
 	block, _ := pem.Decode([]byte(c.ACME.PrivateKey))
 	if block == nil {
-		return errors.New("no private key found in pem")
+		return nil, errors.New("no private key found in pem")
 	}
 	if block.Type != "RSA PRIVATE KEY" || len(block.Headers) != 0 {
-		return errors.New("invalid private key found in pem for acme")
+		return nil, errors.New("invalid private key found in pem for acme")
 	}
 	acmeKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	c.ACME.client = &acme.Client{
 		Key:          acmeKey,
 		DirectoryURL: c.ACME.URL,
 	}
 
-	// Start daemon
-	for {
-		for hostname, hostrec := range c.Domains {
-			// Should always execute on first run
-			if time.Now().After(hostrec.ttl) {
-				err = c.updateCertIfNeeded(hostname, hostrec)
-				if err != nil {
-					log.Printf("error updating cert for %s - sleeping and will try again tomorrow: %s\n", hostname, err)
-				}
-			}
-		}
+	return c, nil
+}
 
-		// Try again tomorrow
-		time.Sleep(time.Hour * 24)
+func mustConvertInt(s string) int {
+	rv, err := strconv.Atoi(s)
+	if err != nil {
+		panic(err)
 	}
+	return rv
+}
+
+func envWithDefault(name, defVal string) string {
+	rv := os.Getenv(name)
+	if len(rv) == 0 {
+		return defVal
+	}
+	return rv
+}
+
+func mustGetEnv(name string) string {
+	rv := os.Getenv(name)
+	if len(rv) == 0 {
+		panic("must set env variable: " + name)
+	}
+	return rv
 }
 
 func main() {
-	var configPath string
+	conf, err := readConf()
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	flag.StringVar(&configPath, "config", "", "Path to config file - required")
-	flag.Parse()
+	err = conf.runOnce()
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	log.Fatal(run(configPath))
+	log.Println("completed successfully")
 }
