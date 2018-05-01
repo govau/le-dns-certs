@@ -22,10 +22,13 @@ export AWS_SECRET_ACCESS_KEY=yyy
 export AWS_REGION=ap-southeast-2
 
 # Email address to register with Let's Encrypt
-export LE_EMAIL=user@example.com
+export LE_EMAIL_ADDRESS=user@example.com
 
 # Private key to access Let's Encrypt
 export LE_PRIVATE_KEY="$(openssl genrsa 2048)"
+
+# Bucket name where certs will be stored
+export S3_BUCKET=yyy
 
 # This is the hostname that you want a certificate now
 export FQDN_FOR_CERT=host.example.com
