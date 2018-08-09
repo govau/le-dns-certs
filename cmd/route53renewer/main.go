@@ -14,6 +14,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -81,7 +82,7 @@ func getTTLOfLeafFromChain(bb []byte) (time.Time, error) {
 }
 
 // getCertFromLetsEncrypt will do a DNS challenge to get a cert
-func (c *config) getCertFromLetsEncrypt(hostname string, hostrec *domainConf, route53client *route53.Route53) ([]byte, error) {
+func (c *config) getCertFromLetsEncrypt(hostnames []string, hostrec *domainConf, route53client *route53.Route53) ([]byte, error) {
 	// First, register our key if not already done
 	if !c.ACME.registered {
 		log.Println("always try to register our key and email address with Let's Encrypt...")
@@ -99,14 +100,14 @@ func (c *config) getCertFromLetsEncrypt(hostname string, hostrec *domainConf, ro
 
 	// Now, initiate DNS challenge
 	log.Println("checking authorization...")
-	authz, err := c.ACME.client.CreateOrder(context.Background(), acme.NewOrder(hostname))
+	order, err := c.ACME.client.CreateOrder(context.Background(), acme.NewOrder(hostnames...))
 	if err != nil {
 		return nil, err
 	}
 
 	// We can skip this if we already have an authorization
-	if authz.Status != acme.StatusValid {
-		for _, domainAuth := range authz.Authorizations {
+	if order.Status != acme.StatusValid {
+		for authzIdx, domainAuth := range order.Authorizations {
 			log.Println("we need to re-authorize for this domain")
 			ac, err := c.ACME.client.GetAuthorization(context.Background(), domainAuth)
 			if err != nil {
@@ -138,7 +139,7 @@ func (c *config) getCertFromLetsEncrypt(hostname string, hostrec *domainConf, ro
 							&route53.Change{
 								Action: aws.String("UPSERT"),
 								ResourceRecordSet: &route53.ResourceRecordSet{
-									Name: aws.String(fmt.Sprintf("_acme-challenge.%s.", hostname)),
+									Name: aws.String(fmt.Sprintf("_acme-challenge.%s.", hostnames[authzIdx])),
 									TTL:  aws.Int64(15),
 									Type: aws.String("TXT"),
 									ResourceRecords: []*route53.ResourceRecord{
@@ -186,15 +187,16 @@ func (c *config) getCertFromLetsEncrypt(hostname string, hostrec *domainConf, ro
 	log.Println("generating certificate signing request...")
 	csr, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
 		Subject: pkix.Name{
-			CommonName: hostname,
+			CommonName: hostnames[0],
 		},
+		DNSNames: hostnames,
 	}, pkey)
 	if err != nil {
 		return nil, err
 	}
 
 	log.Println("requesting certificate...")
-	ders, err := c.ACME.client.FinalizeOrder(context.Background(), authz.FinalizeURL, csr)
+	ders, err := c.ACME.client.FinalizeOrder(context.Background(), order.FinalizeURL, csr)
 	if err != nil {
 		return nil, err
 	}
@@ -246,13 +248,13 @@ func stringval(s *string) string {
 
 // updateCertIfNeeded checks to see if the cert is in the bucket, and if not, or if expired,
 // then will attempt to renew
-func (c *config) updateCertIfNeeded(hostname string, hostrec *domainConf) error {
+func (c *config) updateCertIfNeeded(hostnames []string, hostrec *domainConf) error {
 	sess, err := session.NewSession(aws.NewConfig().WithRegion(c.AWSRegion))
 	if err != nil {
 		return err
 	}
 
-	log.Printf("checking for existing certificate for %s...\n", hostname)
+	log.Printf("checking for existing certificate for %s...\n", strings.Join(hostnames, ","))
 	s3client := s3.New(sess)
 	certTTL, err := c.fetchCertAndReturnExpiry(hostrec, s3client)
 	if err != nil {
@@ -268,7 +270,7 @@ func (c *config) updateCertIfNeeded(hostname string, hostrec *domainConf) error 
 	}
 
 	log.Println("attempting to refresh certificate from Let's Encrypt")
-	certData, err := c.getCertFromLetsEncrypt(hostname, hostrec, route53.New(sess))
+	certData, err := c.getCertFromLetsEncrypt(hostnames, hostrec, route53.New(sess))
 	if err != nil {
 		return err
 	}
@@ -286,7 +288,7 @@ func (c *config) updateCertIfNeeded(hostname string, hostrec *domainConf) error 
 func (c *config) runOnce() error {
 	var retErr error
 	for hostname, hostrec := range c.Domains {
-		err := c.updateCertIfNeeded(hostname, hostrec)
+		err := c.updateCertIfNeeded(strings.Split(hostname, ","), hostrec)
 		if err != nil {
 			log.Printf("error updating cert for %s: %s\n", hostname, err)
 			retErr = errors.New("at least one failed")
@@ -298,7 +300,7 @@ func (c *config) runOnce() error {
 func readConf() (*config, error) {
 	c := &config{
 		ACME: acmeConf{
-			URL:        envWithDefault("LE_URL", "https://acme-v01.api.letsencrypt.org/directory"),
+			URL:        envWithDefault("LE_URL", "https://acme-staging-v02.api.letsencrypt.org/directory"),
 			Email:      mustGetEnv("LE_EMAIL_ADDRESS"),
 			PrivateKey: mustGetEnv("LE_PRIVATE_KEY"),
 		},
