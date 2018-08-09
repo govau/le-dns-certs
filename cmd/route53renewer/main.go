@@ -85,9 +85,10 @@ func (c *config) getCertFromLetsEncrypt(hostname string, hostrec *domainConf, ro
 	// First, register our key if not already done
 	if !c.ACME.registered {
 		log.Println("always try to register our key and email address with Let's Encrypt...")
-		_, err := c.ACME.client.Register(context.Background(), &acme.Account{
-			Contact: []string{"mailto:" + c.ACME.Email},
-		}, acme.AcceptTOS)
+		_, err := c.ACME.client.CreateAccount(context.Background(), &acme.Account{
+			Contact:     []string{"mailto:" + c.ACME.Email},
+			TermsAgreed: true,
+		})
 		if err != nil {
 			log.Println("error registering with Let's Encrypt (this is expected) - ignoring: ", err)
 		}
@@ -98,73 +99,81 @@ func (c *config) getCertFromLetsEncrypt(hostname string, hostrec *domainConf, ro
 
 	// Now, initiate DNS challenge
 	log.Println("checking authorization...")
-	authz, err := c.ACME.client.Authorize(context.Background(), hostname)
+	authz, err := c.ACME.client.CreateOrder(context.Background(), acme.NewOrder(hostname))
 	if err != nil {
 		return nil, err
 	}
 
 	// We can skip this if we already have an authorization
 	if authz.Status != acme.StatusValid {
-		log.Println("we need to re-authorize for this domain")
-		var chal *acme.Challenge
-		for _, c := range authz.Challenges {
-			if c.Type == "dns-01" {
-				chal = c
-				break
+		for _, domainAuth := range authz.Authorizations {
+			log.Println("we need to re-authorize for this domain")
+			ac, err := c.ACME.client.GetAuthorization(context.Background(), domainAuth)
+			if err != nil {
+				return nil, err
 			}
-		}
-		if chal == nil {
-			return nil, errors.New("no supported challenge type found")
-		}
+			if ac.Status != acme.StatusValid {
+				var chal *acme.Challenge
+				for _, c := range ac.Challenges {
+					if c.Type == "dns-01" {
+						chal = c
+						break
+					}
+				}
+				if chal == nil {
+					return nil, errors.New("no supported challenge type found")
+				}
 
-		val, err := c.ACME.client.DNS01ChallengeRecord(chal.Token)
-		if err != nil {
-			return nil, err
-		}
+				val, err := c.ACME.client.DNS01ChallengeRecord(chal.Token)
+				if err != nil {
+					return nil, err
+				}
 
-		// Return TXT record
-		log.Println("setting TXT record in route53")
-		changeResult, err := route53client.ChangeResourceRecordSets(&route53.ChangeResourceRecordSetsInput{
-			HostedZoneId: aws.String(hostrec.ZoneID),
-			ChangeBatch: &route53.ChangeBatch{
-				Changes: []*route53.Change{
-					&route53.Change{
-						Action: aws.String("UPSERT"),
-						ResourceRecordSet: &route53.ResourceRecordSet{
-							Name: aws.String(fmt.Sprintf("_acme-challenge.%s.", hostname)),
-							TTL:  aws.Int64(15),
-							Type: aws.String("TXT"),
-							ResourceRecords: []*route53.ResourceRecord{
-								&route53.ResourceRecord{
-									Value: aws.String(fmt.Sprintf(`"%s"`, val)),
+				// Return TXT record
+				log.Println("setting TXT record in route53")
+				changeResult, err := route53client.ChangeResourceRecordSets(&route53.ChangeResourceRecordSetsInput{
+					HostedZoneId: aws.String(hostrec.ZoneID),
+					ChangeBatch: &route53.ChangeBatch{
+						Changes: []*route53.Change{
+							&route53.Change{
+								Action: aws.String("UPSERT"),
+								ResourceRecordSet: &route53.ResourceRecordSet{
+									Name: aws.String(fmt.Sprintf("_acme-challenge.%s.", hostname)),
+									TTL:  aws.Int64(15),
+									Type: aws.String("TXT"),
+									ResourceRecords: []*route53.ResourceRecord{
+										&route53.ResourceRecord{
+											Value: aws.String(fmt.Sprintf(`"%s"`, val)),
+										},
+									},
 								},
 							},
 						},
 					},
-				},
-			},
-		})
-		if err != nil {
-			return nil, err
-		}
-		log.Println("waiting on route53 change to be complete...")
-		err = route53client.WaitUntilResourceRecordSetsChanged(&route53.GetChangeInput{
-			Id: changeResult.ChangeInfo.Id,
-		})
-		if err != nil {
-			return nil, err
-		}
+				})
+				if err != nil {
+					return nil, err
+				}
+				log.Println("waiting on route53 change to be complete...")
+				err = route53client.WaitUntilResourceRecordSetsChanged(&route53.GetChangeInput{
+					Id: changeResult.ChangeInfo.Id,
+				})
+				if err != nil {
+					return nil, err
+				}
 
-		log.Println("accepting Let's Encrypt challenge")
-		_, err = c.ACME.client.Accept(context.Background(), chal)
-		if err != nil {
-			return nil, err
-		}
+				log.Println("accepting Let's Encrypt challenge")
+				_, err = c.ACME.client.AcceptChallenge(context.Background(), chal)
+				if err != nil {
+					return nil, err
+				}
 
-		log.Println("waiting authorization...")
-		_, err = c.ACME.client.WaitAuthorization(context.Background(), authz.URI)
-		if err != nil {
-			return nil, err
+				log.Println("waiting authorization...")
+				_, err = c.ACME.client.WaitAuthorization(context.Background(), domainAuth)
+				if err != nil {
+					return nil, err
+				}
+			}
 		}
 	}
 
@@ -185,7 +194,7 @@ func (c *config) getCertFromLetsEncrypt(hostname string, hostrec *domainConf, ro
 	}
 
 	log.Println("requesting certificate...")
-	ders, _, err := c.ACME.client.CreateCert(context.Background(), csr, 0, true)
+	ders, err := c.ACME.client.FinalizeOrder(context.Background(), authz.FinalizeURL, csr)
 	if err != nil {
 		return nil, err
 	}
