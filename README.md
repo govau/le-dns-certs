@@ -30,8 +30,13 @@ export LE_PRIVATE_KEY="$(openssl genrsa 2048)"
 # Bucket name where certs will be stored
 export S3_BUCKET=yyy
 
-# This is the hostname that you want a certificate now
+# This is the hostname or wildcard domain that you want a certificate for
 export FQDN_FOR_CERT=host.example.com
+export FQDN_FOR_CERT=*.example.com
+
+# (OPTIONAL) This is the domain that you want to use to authorize the certificate if it differs via CNAME delegation
+# https://www.eff.org/deeplinks/2018/02/technical-deep-dive-securing-automation-acme-dns-challenge-validation
+export FQDN_FOR_AUTH=example.com.acme-challenge-dns01.cloudservice.com
 
 # The route53 hosted zone ID in which the TXT record will be created
 export ROUTE53_ZONEID=xxxx

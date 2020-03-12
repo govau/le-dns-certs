@@ -108,7 +108,7 @@ func (c *config) getCertFromLetsEncrypt(hostnames []string, hostrec *domainConf,
 	// We can skip this if we already have an authorization
 	if order.Status != acme.StatusValid {
 		for authzIdx, domainAuth := range order.Authorizations {
-			log.Println("we need to re-authorize for this domain")
+			log.Println(fmt.Sprintf("we need to re-authorize for this domain: ", order.Identifiers[authzIdx].Value))
 			ac, err := c.ACME.client.GetAuthorization(context.Background(), domainAuth)
 			if err != nil {
 				return nil, err
@@ -131,7 +131,8 @@ func (c *config) getCertFromLetsEncrypt(hostnames []string, hostrec *domainConf,
 				}
 
 				// Return TXT record
-				log.Println("setting TXT record in route53")
+				txtDomain := fmt.Sprintf("_acme-challenge.%s.", strings.Replace(hostrec.AuthorizationDomain, "*.", "", 1))
+				log.Println(fmt.Sprintf("setting TXT record at %s in route53 to authorize for %s", txtDomain, order.Identifiers[authzIdx].Value))
 				changeResult, err := route53client.ChangeResourceRecordSets(&route53.ChangeResourceRecordSetsInput{
 					HostedZoneId: aws.String(hostrec.ZoneID),
 					ChangeBatch: &route53.ChangeBatch{
@@ -139,7 +140,7 @@ func (c *config) getCertFromLetsEncrypt(hostnames []string, hostrec *domainConf,
 							&route53.Change{
 								Action: aws.String("UPSERT"),
 								ResourceRecordSet: &route53.ResourceRecordSet{
-									Name: aws.String(fmt.Sprintf("_acme-challenge.%s.", strings.Replace(order.Identifiers[authzIdx].Value, "*.", "", 1))),
+									Name: aws.String(txtDomain),
 									TTL:  aws.Int64(15),
 									Type: aws.String("TXT"),
 									ResourceRecords: []*route53.ResourceRecord{
@@ -311,6 +312,7 @@ func readConf() (*config, error) {
 				Bucket: mustGetEnv("S3_BUCKET"),
 				Object: envWithDefault("S3_OBJECT", fmt.Sprintf("%s.crt", strings.Replace(mustGetEnv("FQDN_FOR_CERT"), "*", "star", -1))),
 				ZoneID: mustGetEnv("ROUTE53_ZONEID"),
+				AuthorizationDomain: envWithDefault("FQDN_FOR_AUTH", mustGetEnv("FQDN_FOR_CERT")),
 			},
 		},
 	}
