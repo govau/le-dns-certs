@@ -21,11 +21,15 @@ export AWS_SECRET_ACCESS_KEY=yyy
 # Region for both your zone and buckets:
 export AWS_REGION=ap-southeast-2
 
+# OPTIONAL Let's Encrypt API URL to use staging
+export LE_URL=https://acme-staging-v02.api.letsencrypt.org/directory
 # Email address to register with Let's Encrypt
 export LE_EMAIL_ADDRESS=user@example.com
 
 # Private key to access Let's Encrypt
 export LE_PRIVATE_KEY="$(openssl genrsa 2048)"
+# OPTIONAL private key as a file path
+export LE_PRIVATE_KEY_FILE="~/.ssh/le-private-key.pem"
 
 # Bucket name where certs will be stored
 export S3_BUCKET=yyy
@@ -35,6 +39,7 @@ export FQDN_FOR_CERT=host.example.com
 export FQDN_FOR_CERT=*.example.com
 
 # (OPTIONAL) This is the domain that you want to use to authorize the certificate if it differs via CNAME delegation
+# To use, set a CNAME of _acme-challenge.$FQDN_FOR_CERT to _acme-challenge.$FQDN_FOR_AUTH
 # https://www.eff.org/deeplinks/2018/02/technical-deep-dive-securing-automation-acme-dns-challenge-validation
 export FQDN_FOR_AUTH=example.com.acme-challenge-dns01.cloudservice.com
 

@@ -108,7 +108,7 @@ func (c *config) getCertFromLetsEncrypt(hostnames []string, hostrec *domainConf,
 	// We can skip this if we already have an authorization
 	if order.Status != acme.StatusValid {
 		for authzIdx, domainAuth := range order.Authorizations {
-			log.Println(fmt.Sprintf("we need to re-authorize for this domain: ", order.Identifiers[authzIdx].Value))
+			log.Println(fmt.Sprintf("we need to re-authorize for this domain: %s", string(order.Identifiers[authzIdx].Value)))
 			ac, err := c.ACME.client.GetAuthorization(context.Background(), domainAuth)
 			if err != nil {
 				return nil, err
@@ -173,6 +173,8 @@ func (c *config) getCertFromLetsEncrypt(hostnames []string, hostrec *domainConf,
 				log.Println("waiting authorization...")
 				_, err = c.ACME.client.WaitAuthorization(context.Background(), domainAuth)
 				if err != nil {
+					authError := err.(acme.AuthorizationError).Authorization.Challenges[0].Error
+					log.Println(authError)
 					return nil, err
 				}
 			}
@@ -303,7 +305,7 @@ func readConf() (*config, error) {
 		ACME: acmeConf{
 			URL:        envWithDefault("LE_URL", "https://acme-v02.api.letsencrypt.org/directory"),
 			Email:      mustGetEnv("LE_EMAIL_ADDRESS"),
-			PrivateKey: mustGetEnv("LE_PRIVATE_KEY"),
+			PrivateKey: envWithDefault("LE_PRIVATE_KEY", mustGetEnvFile("LE_PRIVATE_KEY_FILE")),
 		},
 		AWSRegion: mustGetEnv("AWS_REGION"),
 		TTLDays:   mustConvertInt(envWithDefault("LE_DAYS_BEFORE_TO_RENEW", "32")),
@@ -358,6 +360,20 @@ func mustGetEnv(name string) string {
 		panic("must set env variable: " + name)
 	}
 	return rv
+}
+
+// get the contents of a file from env var file path
+func mustGetEnvFile(name string) string {
+	rv := os.Getenv(name)
+	if len(rv) == 0 {
+		panic("must set env variable: " + name)
+	}
+	b, err := ioutil.ReadFile(rv) // just pass the file name
+	if err != nil {
+		panic(err)
+	}
+
+	return string(b)
 }
 
 func main() {
