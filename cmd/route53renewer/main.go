@@ -108,7 +108,7 @@ func (c *config) getCertFromLetsEncrypt(hostnames []string, hostrec *domainConf,
 	// We can skip this if we already have an authorization
 	if order.Status != acme.StatusValid {
 		for authzIdx, domainAuth := range order.Authorizations {
-			log.Println("we need to re-authorize for this domain")
+			log.Println(fmt.Sprintf("we need to re-authorize for this domain: %s", string(order.Identifiers[authzIdx].Value)))
 			ac, err := c.ACME.client.GetAuthorization(context.Background(), domainAuth)
 			if err != nil {
 				return nil, err
@@ -131,7 +131,8 @@ func (c *config) getCertFromLetsEncrypt(hostnames []string, hostrec *domainConf,
 				}
 
 				// Return TXT record
-				log.Println("setting TXT record in route53")
+				txtDomain := fmt.Sprintf("_acme-challenge.%s.", strings.Replace(hostrec.AuthorizationDomain, "*.", "", 1))
+				log.Println(fmt.Sprintf("setting TXT record at %s in route53 to authorize for %s", txtDomain, order.Identifiers[authzIdx].Value))
 				changeResult, err := route53client.ChangeResourceRecordSets(&route53.ChangeResourceRecordSetsInput{
 					HostedZoneId: aws.String(hostrec.ZoneID),
 					ChangeBatch: &route53.ChangeBatch{
@@ -139,7 +140,7 @@ func (c *config) getCertFromLetsEncrypt(hostnames []string, hostrec *domainConf,
 							&route53.Change{
 								Action: aws.String("UPSERT"),
 								ResourceRecordSet: &route53.ResourceRecordSet{
-									Name: aws.String(fmt.Sprintf("_acme-challenge.%s.", strings.Replace(order.Identifiers[authzIdx].Value, "*.", "", 1))),
+									Name: aws.String(txtDomain),
 									TTL:  aws.Int64(15),
 									Type: aws.String("TXT"),
 									ResourceRecords: []*route53.ResourceRecord{
@@ -172,6 +173,8 @@ func (c *config) getCertFromLetsEncrypt(hostnames []string, hostrec *domainConf,
 				log.Println("waiting authorization...")
 				_, err = c.ACME.client.WaitAuthorization(context.Background(), domainAuth)
 				if err != nil {
+					authError := err.(acme.AuthorizationError).Authorization.Challenges[0].Error
+					log.Println(authError)
 					return nil, err
 				}
 			}
@@ -302,7 +305,7 @@ func readConf() (*config, error) {
 		ACME: acmeConf{
 			URL:        envWithDefault("LE_URL", "https://acme-v02.api.letsencrypt.org/directory"),
 			Email:      mustGetEnv("LE_EMAIL_ADDRESS"),
-			PrivateKey: mustGetEnv("LE_PRIVATE_KEY"),
+			PrivateKey: envWithDefault("LE_PRIVATE_KEY", mustGetEnvFile("LE_PRIVATE_KEY_FILE")),
 		},
 		AWSRegion: mustGetEnv("AWS_REGION"),
 		TTLDays:   mustConvertInt(envWithDefault("LE_DAYS_BEFORE_TO_RENEW", "32")),
@@ -311,6 +314,7 @@ func readConf() (*config, error) {
 				Bucket: mustGetEnv("S3_BUCKET"),
 				Object: envWithDefault("S3_OBJECT", fmt.Sprintf("%s.crt", strings.Replace(mustGetEnv("FQDN_FOR_CERT"), "*", "star", -1))),
 				ZoneID: mustGetEnv("ROUTE53_ZONEID"),
+				AuthorizationDomain: envWithDefault("FQDN_FOR_AUTH", mustGetEnv("FQDN_FOR_CERT")),
 			},
 		},
 	}
@@ -356,6 +360,20 @@ func mustGetEnv(name string) string {
 		panic("must set env variable: " + name)
 	}
 	return rv
+}
+
+// get the contents of a file from env var file path
+func mustGetEnvFile(name string) string {
+	rv := os.Getenv(name)
+	if len(rv) == 0 {
+		panic("must set env variable: " + name)
+	}
+	b, err := ioutil.ReadFile(rv) // just pass the file name
+	if err != nil {
+		panic(err)
+	}
+
+	return string(b)
 }
 
 func main() {

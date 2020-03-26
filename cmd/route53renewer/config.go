@@ -36,4 +36,7 @@ type domainConf struct {
 
 	// Object that will contain key, cert and intermediates - all PEM encoded
 	Object string
+
+	// Authorization domain, which may be on another domain via CNAME delegated authorization
+	AuthorizationDomain string
 }
