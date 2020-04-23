@@ -305,7 +305,7 @@ func readConf() (*config, error) {
 		ACME: acmeConf{
 			URL:        envWithDefault("LE_URL", "https://acme-v02.api.letsencrypt.org/directory"),
 			Email:      mustGetEnv("LE_EMAIL_ADDRESS"),
-			PrivateKey: envWithDefault("LE_PRIVATE_KEY", mustGetEnvFile("LE_PRIVATE_KEY_FILE")),
+			PrivateKey: mustGetEnvOrEnvFile("LE_PRIVATE_KEY", "LE_PRIVATE_KEY_FILE"),
 		},
 		AWSRegion: mustGetEnv("AWS_REGION"),
 		TTLDays:   mustConvertInt(envWithDefault("LE_DAYS_BEFORE_TO_RENEW", "32")),
@@ -362,11 +362,11 @@ func mustGetEnv(name string) string {
 	return rv
 }
 
-// get the contents of a file from env var file path
-func mustGetEnvFile(name string) string {
-	rv := os.Getenv(name)
+// get the contents of a envvar or file from env var file path
+func mustGetEnvOrEnvFile(envname string, envfile string) string {
+	rv := os.Getenv(envfile)
 	if len(rv) == 0 {
-		panic("must set env variable: " + name)
+		return mustGetEnv(envname)
 	}
 	b, err := ioutil.ReadFile(rv) // just pass the file name
 	if err != nil {
