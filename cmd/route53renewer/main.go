@@ -86,29 +86,27 @@ func (c *config) getCertFromLetsEncrypt(hostnames []string, hostrec *domainConf,
 	// First, register our key if not already done
 	if !c.ACME.registered {
 		log.Println("always try to register our key and email address with Let's Encrypt...")
-		_, err := c.ACME.client.CreateAccount(context.Background(), &acme.Account{
-			Contact:     []string{"mailto:" + c.ACME.Email},
-			TermsAgreed: true,
-		})
+		_, err := c.ACME.client.Register(context.Background(), &acme.Account{
+			Contact: []string{"mailto:" + c.ACME.Email},
+		}, acme.AcceptTOS)
 		if err != nil {
-			log.Println("error registering with Let's Encrypt (this is expected) - ignoring: ", err)
+			log.Println("Error registering with LE - we've likely already done so, so ignoring:", err)
 		}
-
 		// no point re-doing each time
 		c.ACME.registered = true
 	}
 
 	// Now, initiate DNS challenge
 	log.Println("checking authorization...")
-	order, err := c.ACME.client.CreateOrder(context.Background(), acme.NewOrder(hostnames...))
+	order, err := c.ACME.client.AuthorizeOrder(context.Background(), acme.DomainIDs(hostnames...))
 	if err != nil {
 		return nil, err
 	}
 
 	// We can skip this if we already have an authorization
-	if order.Status != acme.StatusValid {
-		for authzIdx, domainAuth := range order.Authorizations {
-			log.Println(fmt.Sprintf("we need to re-authorize for this domain: %s", string(order.Identifiers[authzIdx].Value)))
+	if order.Status != acme.StatusReady {
+		for authzIdx, domainAuth := range order.AuthzURLs {
+			log.Println(fmt.Sprintf("we need to re-authorize for this domain: %s", order.Identifiers[authzIdx].Value))
 			ac, err := c.ACME.client.GetAuthorization(context.Background(), domainAuth)
 			if err != nil {
 				return nil, err
@@ -137,14 +135,14 @@ func (c *config) getCertFromLetsEncrypt(hostnames []string, hostrec *domainConf,
 					HostedZoneId: aws.String(hostrec.ZoneID),
 					ChangeBatch: &route53.ChangeBatch{
 						Changes: []*route53.Change{
-							&route53.Change{
+							{
 								Action: aws.String("UPSERT"),
 								ResourceRecordSet: &route53.ResourceRecordSet{
 									Name: aws.String(txtDomain),
 									TTL:  aws.Int64(15),
 									Type: aws.String("TXT"),
 									ResourceRecords: []*route53.ResourceRecord{
-										&route53.ResourceRecord{
+										{
 											Value: aws.String(fmt.Sprintf(`"%s"`, val)),
 										},
 									},
@@ -165,7 +163,7 @@ func (c *config) getCertFromLetsEncrypt(hostnames []string, hostrec *domainConf,
 				}
 
 				log.Println("accepting Let's Encrypt challenge")
-				_, err = c.ACME.client.AcceptChallenge(context.Background(), chal)
+				_, err = c.ACME.client.Accept(context.Background(), chal)
 				if err != nil {
 					return nil, err
 				}
@@ -173,7 +171,7 @@ func (c *config) getCertFromLetsEncrypt(hostnames []string, hostrec *domainConf,
 				log.Println("waiting authorization...")
 				_, err = c.ACME.client.WaitAuthorization(context.Background(), domainAuth)
 				if err != nil {
-					authError := err.(acme.AuthorizationError).Authorization.Challenges[0].Error
+					authError := err.(*acme.AuthorizationError)
 					log.Println(authError)
 					return nil, err
 				}
@@ -199,7 +197,7 @@ func (c *config) getCertFromLetsEncrypt(hostnames []string, hostrec *domainConf,
 	}
 
 	log.Println("requesting certificate...")
-	ders, err := c.ACME.client.FinalizeOrder(context.Background(), order.FinalizeURL, csr)
+	ders, _, err := c.ACME.client.CreateOrderCert(context.Background(), order.FinalizeURL, csr, true)
 	if err != nil {
 		return nil, err
 	}
@@ -310,10 +308,10 @@ func readConf() (*config, error) {
 		AWSRegion: mustGetEnv("AWS_REGION"),
 		TTLDays:   mustConvertInt(envWithDefault("LE_DAYS_BEFORE_TO_RENEW", "32")),
 		Domains: map[string]*domainConf{
-			mustGetEnv("FQDN_FOR_CERT"): &domainConf{
-				Bucket: mustGetEnv("S3_BUCKET"),
-				Object: envWithDefault("S3_OBJECT", fmt.Sprintf("%s.crt", strings.Replace(mustGetEnv("FQDN_FOR_CERT"), "*", "star", -1))),
-				ZoneID: mustGetEnv("ROUTE53_ZONEID"),
+			mustGetEnv("FQDN_FOR_CERT"): {
+				Bucket:              mustGetEnv("S3_BUCKET"),
+				Object:              envWithDefault("S3_OBJECT", fmt.Sprintf("%s.crt", strings.Replace(mustGetEnv("FQDN_FOR_CERT"), "*", "star", -1))),
+				ZoneID:              mustGetEnv("ROUTE53_ZONEID"),
 				AuthorizationDomain: envWithDefault("FQDN_FOR_AUTH", mustGetEnv("FQDN_FOR_CERT")),
 			},
 		},

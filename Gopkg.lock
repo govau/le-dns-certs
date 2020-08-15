@@ -2,7 +2,6 @@
 
 
 [[projects]]
-  digest = "1:2532ca92456ec161408c036fa3402c3a73052782d9d406a5b43135b720fce05e"
   name = "github.com/aws/aws-sdk-go"
   packages = [
     "aws",
@@ -34,6 +33,7 @@
     "internal/shareddefaults",
     "internal/strings",
     "internal/sync/singleflight",
+    "private/checksum",
     "private/protocol",
     "private/protocol/eventstream",
     "private/protocol/eventstream/eventstreamapi",
@@ -49,39 +49,25 @@
     "service/s3/s3iface",
     "service/s3/s3manager",
     "service/sts",
-    "service/sts/stsiface",
+    "service/sts/stsiface"
   ]
-  pruneopts = "UT"
-  revision = "15d32ef48aa672542e0a58eafb6fef2ce1030a8d"
-  version = "v1.29.24"
+  revision = "de0aa785c5d4efb004061153d592f8e1641f91c4"
+  version = "v1.33.5"
 
 [[projects]]
-  digest = "1:bb81097a5b62634f3e9fec1014657855610c82d19b9a40c17612e32651e35dca"
   name = "github.com/jmespath/go-jmespath"
   packages = ["."]
-  pruneopts = "UT"
   revision = "c2b33e84"
 
 [[projects]]
-  branch = "acmev2"
-  digest = "1:b8fa200fe7d318ea0ea7cf3f16ee4538d08ff2e0706ec582bb3d9d032544fe0f"
+  branch = "master"
   name = "golang.org/x/crypto"
   packages = ["acme"]
-  pruneopts = "UT"
-  revision = "ef1fabc69ab5e4eb93c35ba4ca8166ebd7ebd7eb"
-  source = "https://github.com/govau/le-dns-certs.git"
+  revision = "948cd5f35899cbf089c620b3caeac9b60fa08704"
 
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  input-imports = [
-    "github.com/aws/aws-sdk-go/aws",
-    "github.com/aws/aws-sdk-go/aws/awserr",
-    "github.com/aws/aws-sdk-go/aws/session",
-    "github.com/aws/aws-sdk-go/service/route53",
-    "github.com/aws/aws-sdk-go/service/s3",
-    "github.com/aws/aws-sdk-go/service/s3/s3manager",
-    "golang.org/x/crypto/acme",
-  ]
+  inputs-digest = "1d9017df0a1f69e4e7a2d5dcfe5124a73f6c56ebbec11e8bf4f341fcee4f25bc"
   solver-name = "gps-cdcl"
   solver-version = 1

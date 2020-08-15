@@ -1,11 +1,3 @@
-# Using custom branch before https://go-review.googlesource.com/c/crypto/+/86635 lands...
-# Since dep can't point to a gerrit refs/changes/xxx/xxx spec, we instead as a dirty
-# dirty hack have pushed a custom branch to this repo, which contains the patch.
-[[constraint]]
-  name = "golang.org/x/crypto"
-  source = "https://github.com/govau/le-dns-certs.git"
-  branch = "acmev2"
-
 [prune]
   go-tests = true
   unused-packages = true
